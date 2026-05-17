@@ -32,7 +32,7 @@ FEATURE_COLS = [
     "month", "weekday", "day_of_year", "is_weekend",
     "PRCP", "TMAX", "TMIN", "AWND",
     "any_precip", "extreme_precip", "heat_day", "freeze_day", "snow_day",
-    "trip_count_lag1h", "trip_count_lag2h", "trip_count_lag3h", "trip_count_lag24h",
+    "trip_count_lag1d", "trip_count_lag2d", "trip_count_lag3d", "trip_count_lag7d",
     "trip_count_roll7d", "trip_count_roll30d",
 ]
 

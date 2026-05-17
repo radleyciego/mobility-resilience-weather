@@ -34,16 +34,21 @@ def _flag_weather_shocks(
     weather: pl.DataFrame,
     precip_pct: float = 0.95,
 ) -> pl.DataFrame:
-    threshold = weather.select(pl.col("PRCP").quantile(precip_pct)).item()
+    non_null_precip = weather.filter(pl.col("PRCP").is_not_null() & (pl.col("PRCP") > 0))
+    threshold = (
+        non_null_precip.select(pl.col("PRCP").quantile(precip_pct)).item()
+        if non_null_precip.height > 0
+        else 0.0
+    )
     return weather.with_columns(
         pl.col("PRCP")
         .is_not_null()
         .and_(pl.col("PRCP") > 0)
         .alias("any_precip"),
         (pl.col("PRCP") > threshold).alias("extreme_precip"),
-        (pl.col("TMAX") > 350).alias("heat_day"),       # 35.0 °C
-        (pl.col("TMIN") < 0).alias("freeze_day"),        # 0 °C
-        (pl.col("SNOW") > 25.4).alias("snow_day"),       # 1 inch
+        (pl.col("TMAX") > 350).alias("heat_day"),
+        (pl.col("TMIN") < 0).alias("freeze_day"),
+        (pl.col("SNOW") > 25.4).alias("snow_day"),
     )
 
 

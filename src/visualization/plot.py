@@ -54,9 +54,10 @@ def plot_equity_comparison(
 ):
     set_style()
     quintiles = [q for q in ["lowest", "low", "middle", "high", "highest"]
-                 if q in equity_results]
+                 if q in equity_results
+                 and equity_results[q].get("mean_pct_of_baseline") is not None]
     means = [equity_results[q]["mean_pct_of_baseline"] for q in quintiles]
-    stds = [equity_results[q]["std_pct_of_baseline"] for q in quintiles]
+    stds = [equity_results[q].get("std_pct_of_baseline", 0) or 0 for q in quintiles]
 
     fig, ax = plt.subplots(figsize=(8, 5))
     colors = ["#d7191c", "#fdae61", "#ffffbf", "#a6d96a", "#1a9641"]

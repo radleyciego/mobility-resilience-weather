@@ -1,53 +1,99 @@
 import os
-import requests
+import time
+import json
+import subprocess
 import polars as pl
-from datetime import date
 from dotenv import load_dotenv
 from .config import DATA_RAW, NOAA_TOKEN_ENV
 
 load_dotenv()
 
-STATION_ID = "GHCND:USW00094728"  # Central Park, NY
+STATION_ID = "GHCND:USW00094728"
 DATASET_ID = "GHCND"
+BASE_URL = "https://www.ncei.noaa.gov/cdo-web/api/v2/data"
 
 DAILY_DTYPES = [
-    "PRCP",  # precipitation (mm)
-    "TMAX",  # max temperature (tenths °C)
-    "TMIN",  # min temperature (tenths °C)
-    "AWND",  # avg wind speed (tenths m/s)
-    "SNOW",  # snowfall (mm)
-    "SNWD",  # snow depth (mm)
+    "PRCP",
+    "TMAX",
+    "TMIN",
+    "AWND",
+    "SNOW",
+    "SNWD",
 ]
 
 
-def _fetch_year(year: int) -> list[dict]:
-    token = os.getenv(NOAA_TOKEN_ENV)
-    url = "https://www.ncei.noaa.gov/access/services/data/v1"
-    params = {
-        "dataset": DATASET_ID,
-        "stations": STATION_ID,
-        "startDate": f"{year}-01-01",
-        "endDate": f"{year}-12-31",
-        "dataTypes": ",".join(DAILY_DTYPES),
-        "format": "json",
-        "units": "metric",
-    }
-    headers = {"token": token} if token else {}
-    resp = requests.get(url, params=params, headers=headers, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+def _curl_get(url: str, token: str, timeout: int = 30) -> dict:
+    cmd = [
+        "curl", "-s", "--max-time", str(timeout), url,
+        "-H", f"token: {token}",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 10)
+    result.check_returncode()
+    return json.loads(result.stdout)
+
+
+def _fetch_datatype(year: int, datatype: str, token: str) -> list[dict]:
+    all_records = []
+    offset = 1
+    limit = 1000
+
+    while True:
+        url = (
+            f"{BASE_URL}?datasetid={DATASET_ID}"
+            f"&stationid={STATION_ID}"
+            f"&startdate={year}-01-01&enddate={year}-12-31"
+            f"&datatypeid={datatype}"
+            f"&limit={limit}&offset={offset}"
+            f"&units=metric"
+        )
+        data = _curl_get(url, token)
+        results = data.get("results", [])
+        all_records.extend(results)
+
+        count = data.get("metadata", {}).get("resultset", {}).get("count", 0)
+        if offset + limit > count:
+            break
+        offset += limit
+        time.sleep(0.2)
+
+    return all_records
+
+
+def _tall_to_wide(records: list[dict]) -> pl.DataFrame:
+    if not records:
+        return pl.DataFrame()
+
+    df = pl.DataFrame(records)
+    df = df.with_columns(pl.col("date").str.to_date("%Y-%m-%dT%H:%M:%S"))
+    df = df.filter(pl.col("datatype").is_in(DAILY_DTYPES))
+    df = df.select(["date", "datatype", "value"])
+    df = df.with_columns(pl.col("value").cast(pl.Float64, strict=False))
+
+    pivot = df.pivot(
+        index="date",
+        on="datatype",
+        values="value",
+        aggregate_function="first",
+    )
+
+    for dtype in DAILY_DTYPES:
+        if dtype not in pivot.columns:
+            pivot = pivot.with_columns(pl.lit(None).alias(dtype))
+
+    return pivot.sort("date")
 
 
 def download_years(years: list[int]) -> pl.DataFrame:
-    rows = []
+    token = os.getenv(NOAA_TOKEN_ENV, "")
+    all_pivots = []
     for year in years:
-        rows.extend(_fetch_year(year))
-    df = pl.DataFrame(rows)
-    df = df.with_columns(pl.col("date").str.to_date("%Y-%m-%d"))
-    for col in DAILY_DTYPES:
-        if col in df.columns:
-            df = df.with_columns(pl.col(col).cast(pl.Float64, strict=False))
-    return df
+        all_records = []
+        for dtype in DAILY_DTYPES:
+            recs = _fetch_datatype(year, dtype, token)
+            all_records.extend(recs)
+        pivot = _tall_to_wide(all_records)
+        all_pivots.append(pivot)
+    return pl.concat(all_pivots) if all_pivots else pl.DataFrame()
 
 
 def load_weather(year: int = 2024) -> pl.DataFrame:

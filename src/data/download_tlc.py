@@ -38,5 +38,21 @@ def download_range(years: list[int] | None = None, max_workers: int = 4) -> list
     return sorted(paths)
 
 
+DATETIME_COLS = [
+    "request_datetime",
+    "on_scene_datetime",
+    "pickup_datetime",
+    "dropoff_datetime",
+]
+
+
 def load_raw(pattern: str = "fhvhv_2024-*.parquet") -> pl.LazyFrame:
-    return pl.scan_parquet(str(DATA_RAW / pattern))
+    paths = sorted(str(p) for p in DATA_RAW.glob(pattern))
+    frames = []
+    for p in paths:
+        frames.append(
+            pl.scan_parquet(p).with_columns(
+                pl.col(c).cast(pl.Datetime("us")) for c in DATETIME_COLS
+            )
+        )
+    return pl.concat(frames)

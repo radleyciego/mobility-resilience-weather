@@ -28,9 +28,12 @@ def load_zone_income() -> pl.DataFrame:
     )
     stub = stub.with_columns(
         pl.col("median_income")
-        .qcut(5, labels=list(range(1, 6)))
+        .qcut(5)
         .cast(pl.Int32)
         .alias("income_quintile")
+    )
+    stub = stub.with_columns(
+        (pl.col("income_quintile") + 1).alias("income_quintile")
     )
     stub.write_parquet(path)
     return stub
